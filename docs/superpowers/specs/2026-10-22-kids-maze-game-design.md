@@ -73,7 +73,7 @@
 │   └── style.css
 ├── js/
 │   ├── main.js          # 页面流转、事件绑定
-│   ├── maze.js          # 移动、碰撞、通关检测
+│   ├── maze-core.js     # 移动、碰撞、通关检测
 │   ├── render.js        # 迷宫与角色绘制
 │   └── levels.js        # 三关地图数据（二维数组）
 └── docs/superpowers/specs/...
