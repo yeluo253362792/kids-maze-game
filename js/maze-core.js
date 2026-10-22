@@ -6,6 +6,8 @@
   const N = 1, E = 2, S = 4, W = 8;
   const DELTA = { N: [-1, 0], E: [0, 1], S: [1, 0], W: [0, -1] };
   const OPP = { N: S, E: W, S: N, W: E };
+  const BITS = { N, E, S, W };
+  const DIRS = ['N', 'E', 'S', 'W'];
 
   function mulberry32(a) {
     return function () {
@@ -16,36 +18,57 @@
     };
   }
 
-  function shuffle(arr, rnd) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(rnd() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
+  function openingCount(cell) {
+    let n = 0;
+    for (const dir of DIRS) if (!(cell & BITS[dir])) n++;
+    return n;
   }
 
+  /** Prim's algorithm: more dead-ends and forks than DFS backtracker. */
   function generateMaze(size, seed) {
     const cells = Array.from({ length: size }, () =>
       Array.from({ length: size }, () => N | E | S | W)
     );
     const rnd = mulberry32(seed >>> 0);
-    const visited = Array.from({ length: size }, () => Array(size).fill(false));
+    const inMaze = Array.from({ length: size }, () => Array(size).fill(false));
+    const frontier = [];
 
-    function carve(r, c) {
-      visited[r][c] = true;
-      const order = shuffle(['N', 'E', 'S', 'W'], rnd);
-      for (const dir of order) {
+    function addFrontier(r, c) {
+      for (const dir of DIRS) {
         const [dr, dc] = DELTA[dir];
-        const nr = r + dr, nc = c + dc;
+        const nr = r + dr;
+        const nc = c + dc;
         if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
-        if (visited[nr][nc]) continue;
-        cells[r][c] &= ~({ N, E, S, W }[dir]);
-        cells[nr][nc] &= ~OPP[dir];
-        carve(nr, nc);
+        if (inMaze[nr][nc]) continue;
+        if (!frontier.some((f) => f.r === nr && f.c === nc)) {
+          frontier.push({ r: nr, c: nc });
+        }
       }
     }
 
-    carve(0, 0);
+    inMaze[0][0] = true;
+    addFrontier(0, 0);
+
+    while (frontier.length) {
+      const i = Math.floor(rnd() * frontier.length);
+      const { r, c } = frontier.splice(i, 1)[0];
+      const neighbors = [];
+      for (const dir of DIRS) {
+        const [dr, dc] = DELTA[dir];
+        const nr = r + dr;
+        const nc = c + dc;
+        if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
+        if (inMaze[nr][nc]) neighbors.push(dir);
+      }
+      if (!neighbors.length) continue;
+      const dir = neighbors[Math.floor(rnd() * neighbors.length)];
+      const [dr, dc] = DELTA[dir];
+      cells[r][c] &= ~BITS[dir];
+      cells[r + dr][c + dc] &= ~OPP[dir];
+      inMaze[r][c] = true;
+      addFrontier(r, c);
+    }
+
     return {
       size,
       cells,
@@ -55,7 +78,7 @@
   }
 
   function tryMove(maze, pos, dir) {
-    const bit = { N, E, S, W }[dir];
+    const bit = BITS[dir];
     if (maze.cells[pos.r][pos.c] & bit) {
       return { pos: { ...pos }, moved: false, bumped: true };
     }
@@ -81,11 +104,11 @@
         return;
       }
       seen[r][c] = true;
-      for (const dir of ['N', 'E', 'S', 'W']) {
-        const bit = { N, E, S, W }[dir];
-        if (cells[r][c] & bit) continue;
+      for (const dir of DIRS) {
+        if (cells[r][c] & BITS[dir]) continue;
         const [dr, dc] = DELTA[dir];
-        const nr = r + dr, nc = c + dc;
+        const nr = r + dr;
+        const nc = c + dc;
         if (seen[nr][nc]) continue;
         dfs(nr, nc);
       }
@@ -95,5 +118,57 @@
     return count;
   }
 
-  return { generateMaze, tryMove, isAtGoal, countPaths, WALL: { N, E, S, W } };
+  /** Branching stats for difficulty checks (unique-path mazes). */
+  function mazeStats(maze) {
+    const { size, cells, start, goal } = maze;
+    let deadEnds = 0;
+    let junctions = 0;
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        const o = openingCount(cells[r][c]);
+        if (o === 1) deadEnds++;
+        if (o >= 3) junctions++;
+      }
+    }
+
+    const prev = Array.from({ length: size }, () => Array(size).fill(null));
+    const seen = Array.from({ length: size }, () => Array(size).fill(false));
+    const queue = [{ r: start.r, c: start.c }];
+    seen[start.r][start.c] = true;
+    while (queue.length) {
+      const { r, c } = queue.shift();
+      if (r === goal.r && c === goal.c) break;
+      for (const dir of DIRS) {
+        if (cells[r][c] & BITS[dir]) continue;
+        const [dr, dc] = DELTA[dir];
+        const nr = r + dr;
+        const nc = c + dc;
+        if (seen[nr][nc]) continue;
+        seen[nr][nc] = true;
+        prev[nr][nc] = { r, c };
+        queue.push({ r: nr, c: nc });
+      }
+    }
+
+    let solutionLength = 0;
+    let solutionJunctions = 0;
+    let cur = { r: goal.r, c: goal.c };
+    while (!(cur.r === start.r && cur.c === start.c)) {
+      solutionLength++;
+      if (openingCount(cells[cur.r][cur.c]) >= 3) solutionJunctions++;
+      cur = prev[cur.r][cur.c];
+      if (!cur) break;
+    }
+
+    return { deadEnds, junctions, solutionLength, solutionJunctions };
+  }
+
+  return {
+    generateMaze,
+    tryMove,
+    isAtGoal,
+    countPaths,
+    mazeStats,
+    WALL: { N, E, S, W },
+  };
 });

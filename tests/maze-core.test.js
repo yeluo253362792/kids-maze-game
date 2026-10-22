@@ -1,5 +1,11 @@
 const assert = require('assert');
-const { generateMaze, tryMove, isAtGoal, countPaths } = require('../js/maze-core.js');
+const {
+  generateMaze,
+  tryMove,
+  isAtGoal,
+  countPaths,
+  mazeStats,
+} = require('../js/maze-core.js');
 
 const maze = generateMaze(10, 42);
 assert.strictEqual(maze.size, 10);
@@ -23,5 +29,13 @@ for (const [size, seed] of [[10, 1], [15, 2], [20, 3]]) {
   const m = generateMaze(size, seed);
   assert.strictEqual(countPaths(m), 1, `${size}x${size} seed ${seed}`);
 }
+
+// Prim-style mazes should offer plenty of wrong turns (not long DFS corridors).
+const branched = mazeStats(generateMaze(10, 42));
+assert.ok(branched.deadEnds >= 25, `deadEnds ${branched.deadEnds}`);
+assert.ok(
+  branched.solutionJunctions >= 8,
+  `solutionJunctions ${branched.solutionJunctions}`
+);
 
 console.log('All maze-core tests passed.');
