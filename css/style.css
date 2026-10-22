@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap');
+
 :root {
   --bg: #e8f5d8;
   --ink: #2a3b1f;
@@ -8,7 +10,6 @@
   --radius: 20px;
   font-family: "Nunito", "PingFang SC", "Hiragino Sans GB", sans-serif;
 }
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap');
 
 body[data-theme="forest"] { --bg: #e8f5d8; --ink: #2a3b1f; --wall: #6b8f4e; --path: #fff8e7; --accent: #f0a83a; }
 body[data-theme="ocean"]  { --bg: #d9f1f7; --ink: #1a3a4a; --wall: #3aa0b8; --path: #eefcff; --accent: #ff8fab; }
