@@ -11,22 +11,18 @@
     <section id="screen-home" class="screen active">
       <h1 class="brand">奇妙迷宫</h1>
       <p class="tagline">选一个主题，走到终点吧</p>
-      <button type="button" id="btn-start" class="btn primary">开始</button>
-    </section>
-
-    <section id="screen-select" class="screen">
-      <h2>选关</h2>
       <div id="level-cards" class="cards"></div>
-      <button type="button" id="btn-back-home" class="btn ghost">返回</button>
     </section>
 
     <section id="screen-play" class="screen">
       <header class="play-bar">
-        <button type="button" id="btn-back-select" class="btn ghost">返回</button>
+        <button type="button" id="btn-back-home" class="btn ghost">返回</button>
         <h2 id="play-title"></h2>
         <button type="button" id="btn-restart" class="btn ghost">重来</button>
       </header>
-      <div id="maze" class="maze" aria-label="迷宫"></div>
+      <div class="maze-host">
+        <div id="maze" class="maze" aria-label="迷宫"></div>
+      </div>
       <div class="dpad" aria-label="方向键">
         <button type="button" class="btn dpad-btn" data-dir="N" aria-label="上">▲</button>
         <div class="dpad-mid">
@@ -44,11 +40,13 @@
         </div>
       </div>
     </section>
+
+    <div id="loading-overlay" class="loading-overlay hidden" aria-live="polite">
+      <p class="loading-text">加载中…</p>
+    </div>
   </div>
 
-  <script src="js/maze-core.js"></script>
-  <script src="js/levels.js"></script>
-  <script src="js/render.js"></script>
-  <script src="js/main.js"></script>
+  <!-- Boot loads game scripts, then shows level cards on the home screen -->
+  <script src="js/boot.js"></script>
 </body>
 </html>

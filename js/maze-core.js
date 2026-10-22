@@ -8,8 +8,7 @@
   const OPP = { N: S, E: W, S: N, W: E };
   const BITS = { N, E, S, W };
   const DIRS = ['N', 'E', 'S', 'W'];
-  /** Max wrong-path fork nesting (solution → wrong → wrong-on-wrong). */
-  const MAX_WRONG_NEST = 2;
+  const DEFAULT_MAX_WRONG_NEST = 2;
 
   function mulberry32(a) {
     return function () {
@@ -44,146 +43,263 @@
     return null;
   }
 
-  /**
-   * Full-grid maze (every cell walkable), unique start→goal path.
-   * Prefers attaching so wrong-path fork nesting stays ≤ MAX_WRONG_NEST:
-   * nest0 = solution, nest1 = first wrong branch, nest2 = second layer
-   * (nest-2 tips extend as corridors; forks at nest-2 only as last resort).
-   */
-  function generateMaze(size, seed) {
-    const rnd = mulberry32(seed >>> 0);
-    const start = { r: 0, c: 0 };
-    const goal = { r: size - 1, c: size - 1 };
-    const cells = Array.from({ length: size }, () =>
-      Array.from({ length: size }, () => N | E | S | W)
-    );
-    const nest = Array.from({ length: size }, () => Array(size).fill(-1));
-    const carved = Array.from({ length: size }, () => Array(size).fill(false));
+  function sealEdge(cells, a, b) {
+    const d = dirBetween(a, b);
+    cells[a.r][a.c] |= BITS[d];
+    cells[b.r][b.c] |= OPP[d];
+  }
 
-    // 1) Solution path
-    const path = [];
-    const onPath = Array.from({ length: size }, () => Array(size).fill(false));
-    path.push({ ...start });
-    onPath[0][0] = true;
-    let guard = 0;
-    const pathLimit = size * size * 10;
-    while (!(path[path.length - 1].r === goal.r && path[path.length - 1].c === goal.c)) {
-      if (++guard > pathLimit) {
-        // Fall back: L-shaped path so generation always succeeds
-        path.length = 0;
-        for (let c = 0; c < size; c++) path.push({ r: 0, c });
-        for (let r = 1; r < size; r++) path.push({ r, c: size - 1 });
+  function carveEdge(cells, a, b) {
+    const d = dirBetween(a, b);
+    cells[a.r][a.c] &= ~BITS[d];
+    cells[b.r][b.c] &= ~OPP[d];
+  }
+
+  function neighborsOpen(cells, size, r, c) {
+    const list = [];
+    for (const dir of DIRS) {
+      if (cells[r][c] & BITS[dir]) continue;
+      const [dr, dc] = DELTA[dir];
+      list.push({ r: r + dr, c: c + dc });
+    }
+    return list;
+  }
+
+  function buildSolutionSet(maze) {
+    const { size, cells, start, goal } = maze;
+    const prev = Array.from({ length: size }, () => Array(size).fill(null));
+    const seen = Array.from({ length: size }, () => Array(size).fill(false));
+    const queue = [{ r: start.r, c: start.c }];
+    seen[start.r][start.c] = true;
+    while (queue.length) {
+      const { r, c } = queue.shift();
+      if (r === goal.r && c === goal.c) break;
+      for (const nb of neighborsOpen(cells, size, r, c)) {
+        if (seen[nb.r][nb.c]) continue;
+        seen[nb.r][nb.c] = true;
+        prev[nb.r][nb.c] = { r, c };
+        queue.push(nb);
+      }
+    }
+    const onSol = new Set();
+    let cur = { r: goal.r, c: goal.c };
+    while (cur) {
+      onSol.add(`${cur.r},${cur.c}`);
+      if (cur.r === start.r && cur.c === start.c) break;
+      cur = prev[cur.r][cur.c];
+    }
+    return onSol;
+  }
+
+  /** BFS wrong-tree fork depths; returns max nest and per-cell visit depth. */
+  function wrongForkInfo(maze, onSol) {
+    const { size, cells } = maze;
+    const visitFork = Array.from({ length: size }, () => Array(size).fill(-1));
+    let maxNest = 0;
+    const deepEdges = []; // {jr,jc, cr,cc, nestAtJunction}
+
+    for (const key of onSol) {
+      const [r0, c0] = key.split(',').map(Number);
+      for (const nb of neighborsOpen(cells, size, r0, c0)) {
+        if (onSol.has(`${nb.r},${nb.c}`)) continue;
+        const q = [{ r: nb.r, c: nb.c, forkDepth: 0, from: { r: r0, c: c0 } }];
+        const seen = new Set([`${nb.r},${nb.c}`]);
+        while (q.length) {
+          const { r, c, forkDepth, from } = q.shift();
+          visitFork[r][c] = Math.max(visitFork[r][c], forkDepth);
+          const o = openingCount(cells[r][c]);
+          const nextFork = o >= 3 ? forkDepth + 1 : forkDepth;
+          maxNest = Math.max(maxNest, nextFork);
+          if (o >= 3 && nextFork > 0) {
+            for (const ch of neighborsOpen(cells, size, r, c)) {
+              if (ch.r === from.r && ch.c === from.c) continue;
+              if (onSol.has(`${ch.r},${ch.c}`)) continue;
+              deepEdges.push({
+                jr: r,
+                jc: c,
+                cr: ch.r,
+                cc: ch.c,
+                nestAtJunction: nextFork,
+              });
+            }
+          }
+          for (const ch of neighborsOpen(cells, size, r, c)) {
+            const k = `${ch.r},${ch.c}`;
+            if (onSol.has(k) || seen.has(k)) continue;
+            if (ch.r === from.r && ch.c === from.c) continue;
+            seen.add(k);
+            q.push({ r: ch.r, c: ch.c, forkDepth: nextFork, from: { r, c } });
+          }
+        }
+      }
+    }
+    return { maxNest, visitFork, deepEdges };
+  }
+
+  function componentOf(cells, size, root, blockedEdge) {
+    const set = new Set();
+    const q = [root];
+    set.add(`${root.r},${root.c}`);
+    while (q.length) {
+      const cur = q.shift();
+      for (const nb of neighborsOpen(cells, size, cur.r, cur.c)) {
+        if (
+          blockedEdge &&
+          ((cur.r === blockedEdge.a.r &&
+            cur.c === blockedEdge.a.c &&
+            nb.r === blockedEdge.b.r &&
+            nb.c === blockedEdge.b.c) ||
+            (cur.r === blockedEdge.b.r &&
+              cur.c === blockedEdge.b.c &&
+              nb.r === blockedEdge.a.r &&
+              nb.c === blockedEdge.a.c))
+        ) {
+          continue;
+        }
+        const k = `${nb.r},${nb.c}`;
+        if (set.has(k)) continue;
+        set.add(k);
+        q.push(nb);
+      }
+    }
+    return set;
+  }
+
+  function reduceWrongNesting(maze, maxNest, rnd) {
+    const { size, cells } = maze;
+    for (let iter = 0; iter < size * size * 20; iter++) {
+      const onSol = buildSolutionSet(maze);
+      const info = wrongForkInfo(maze, onSol);
+      if (info.maxNest <= maxNest) return true;
+
+      // Prefer cutting edges from the deepest junctions
+      const candidates = info.deepEdges
+        .filter((e) => e.nestAtJunction > maxNest)
+        .sort((a, b) => b.nestAtJunction - a.nestAtJunction);
+      const pool = candidates.length ? candidates : info.deepEdges;
+      if (!pool.length) return false;
+      shuffle(pool, rnd);
+
+      let reduced = false;
+      for (const edge of pool.slice(0, 40)) {
+        const J = { r: edge.jr, c: edge.jc };
+        const C = { r: edge.cr, c: edge.cc };
+        sealEdge(cells, J, C);
+        const comp = componentOf(cells, size, C, null);
+
+        // Find reconnect: cell in comp adjacent to outside with shallow fork
+        const borders = [];
+        for (const key of comp) {
+          const [r, c] = key.split(',').map(Number);
+          for (const d of DIRS) {
+            const [dr, dc] = DELTA[d];
+            const nr = r + dr;
+            const nc = c + dc;
+            if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
+            if (comp.has(`${nr},${nc}`)) continue;
+            // Outside cell
+            let depth;
+            if (onSol.has(`${nr},${nc}`)) depth = 0;
+            else {
+              const vf = info.visitFork[nr][nc];
+              depth = vf < 0 ? maxNest + 1 : vf;
+              // If outside is a junction, child would be depth+1
+              if (openingCount(cells[nr][nc]) >= 2) depth = depth + 1;
+            }
+            if (depth <= maxNest) borders.push({ a: { r, c }, b: { r: nr, c: nc }, depth });
+          }
+        }
+        if (!borders.length) {
+          // Any geometric neighbor outside the component (keep spanning tree)
+          for (const key of comp) {
+            const [r, c] = key.split(',').map(Number);
+            for (const d of DIRS) {
+              const [dr, dc] = DELTA[d];
+              const nr = r + dr;
+              const nc = c + dc;
+              if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
+              if (comp.has(`${nr},${nc}`)) continue;
+              borders.push({ a: { r, c }, b: { r: nr, c: nc }, depth: 99 });
+            }
+          }
+        }
+        if (!borders.length) {
+          carveEdge(cells, J, C); // revert
+          continue;
+        }
+        borders.sort((a, b) => a.depth - b.depth || rnd() - 0.5);
+        const pick = borders[0];
+        carveEdge(cells, pick.a, pick.b);
+        reduced = true;
         break;
       }
-      const cur = path[path.length - 1];
-      const opts = [];
-      for (const d of DIRS) {
-        const [dr, dc] = DELTA[d];
-        const nr = cur.r + dr;
-        const nc = cur.c + dc;
-        if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
-        if (onPath[nr][nc]) continue;
-        const before = Math.abs(goal.r - cur.r) + Math.abs(goal.c - cur.c);
-        const after = Math.abs(goal.r - nr) + Math.abs(goal.c - nc);
-        opts.push({ nr, nc, better: after < before });
-      }
-      if (!opts.length) {
-        if (path.length <= 1) {
-          path.length = 0;
-          for (let c = 0; c < size; c++) path.push({ r: 0, c });
-          for (let r = 1; r < size; r++) path.push({ r, c: size - 1 });
-          break;
-        }
-        const dead = path.pop();
-        onPath[dead.r][dead.c] = false;
-        continue;
-      }
-      const better = opts.filter((o) => o.better);
-      const choice =
-        better.length && rnd() < 0.62
-          ? better[Math.floor(rnd() * better.length)]
-          : opts[Math.floor(rnd() * opts.length)];
-      onPath[choice.nr][choice.nc] = true;
-      path.push({ r: choice.nr, c: choice.nc });
+      if (!reduced) return false;
     }
+    const onSol = buildSolutionSet(maze);
+    return wrongForkInfo(maze, onSol).maxNest <= maxNest;
+  }
 
-    function carveEdge(a, b) {
-      const d = dirBetween(a, b);
-      cells[a.r][a.c] &= ~BITS[d];
-      cells[b.r][b.c] &= ~OPP[d];
-    }
+  /**
+   * Full-grid unique-path maze. Builds a Prim spanning tree, then rewires
+   * wrong-path branches so fork nesting stays ≤ maxNest (2 or 3).
+   */
+  function generateMaze(size, seed, maxNest) {
+    if (maxNest == null) maxNest = DEFAULT_MAX_WRONG_NEST;
+    maxNest = Math.max(1, Math.min(6, maxNest | 0));
+    const start = { r: 0, c: 0 };
+    const goal = { r: size - 1, c: size - 1 };
 
-    for (let r = 0; r < size; r++) {
-      for (let c = 0; c < size; c++) {
-        carved[r][c] = false;
-        nest[r][c] = -1;
-        cells[r][c] = N | E | S | W;
-      }
-    }
-    for (const p of path) {
-      carved[p.r][p.c] = true;
-      nest[p.r][p.c] = 0;
-    }
-    for (let i = 0; i < path.length - 1; i++) carveEdge(path[i], path[i + 1]);
-
-    function carvedNeighbors(r, c) {
-      const list = [];
-      for (const d of DIRS) {
-        const [dr, dc] = DELTA[d];
-        const nr = r + dr;
-        const nc = c + dc;
-        if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
-        if (carved[nr][nc]) list.push({ r: nr, c: nc });
-      }
-      return list;
-    }
-
-    function rankParent(p) {
-      const pn = nest[p.r][p.c];
-      const openings = openingCount(cells[p.r][p.c]);
-      // Prefer lower nest; at nest 2 prefer corridor tips (1 opening)
-      if (pn < MAX_WRONG_NEST) return pn * 10;
-      if (openings === 1) return 20;
-      return 30; // last resort: creates a nest-2 fork
-    }
-
-    // 2) Attach every remaining cell (full grid)
-    let remaining = size * size - path.length;
-    let safety = size * size * 5;
-    while (remaining > 0 && safety-- > 0) {
-      const frontier = [];
-      for (let r = 0; r < size; r++) {
-        for (let c = 0; c < size; c++) {
-          if (carved[r][c]) continue;
-          if (carvedNeighbors(r, c).length) frontier.push({ r, c });
-        }
-      }
-      if (!frontier.length) break;
-      shuffle(frontier, rnd);
-      // Prefer cells that can attach without creating a nest-2 fork
-      const soft = frontier.filter((cell) =>
-        carvedNeighbors(cell.r, cell.c).some((p) => rankParent(p) < 30)
+    for (let attempt = 0; attempt < 48; attempt++) {
+      const attemptSeed = (seed + attempt * 104729) >>> 0;
+      const rnd = mulberry32(attemptSeed);
+      const cells = Array.from({ length: size }, () =>
+        Array.from({ length: size }, () => N | E | S | W)
       );
-      const pool = soft.length ? soft : frontier;
-      const cell = pool[0];
-      const parents = carvedNeighbors(cell.r, cell.c);
-      parents.sort((a, b) => rankParent(a) - rankParent(b) || rnd() - 0.5);
-      const bestRank = rankParent(parents[0]);
-      const top = parents.filter((p) => rankParent(p) === bestRank);
-      const parent = top[Math.floor(rnd() * top.length)];
-      const pn = nest[parent.r][parent.c];
-      const childNest = pn < MAX_WRONG_NEST ? pn + 1 : MAX_WRONG_NEST;
-      carveEdge(parent, cell);
-      carved[cell.r][cell.c] = true;
-      nest[cell.r][cell.c] = childNest;
-      remaining--;
-    }
+      const inMaze = Array.from({ length: size }, () => Array(size).fill(false));
+      const frontier = [];
 
-    if (remaining > 0) {
-      throw new Error('maze generation left uncarved cells');
-    }
+      function addFrontier(r, c) {
+        for (const dir of DIRS) {
+          const [dr, dc] = DELTA[dir];
+          const nr = r + dr;
+          const nc = c + dc;
+          if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
+          if (inMaze[nr][nc]) continue;
+          if (!frontier.some((f) => f.r === nr && f.c === nc)) frontier.push({ r: nr, c: nc });
+        }
+      }
 
-    return { size, cells, nest, start, goal };
+      inMaze[0][0] = true;
+      addFrontier(0, 0);
+      while (frontier.length) {
+        const i = Math.floor(rnd() * frontier.length);
+        const { r, c } = frontier.splice(i, 1)[0];
+        const neigh = [];
+        for (const dir of DIRS) {
+          const [dr, dc] = DELTA[dir];
+          const nr = r + dr;
+          const nc = c + dc;
+          if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
+          if (inMaze[nr][nc]) neigh.push(dir);
+        }
+        if (!neigh.length) continue;
+        const dir = neigh[Math.floor(rnd() * neigh.length)];
+        const [dr, dc] = DELTA[dir];
+        cells[r][c] &= ~BITS[dir];
+        cells[r + dr][c + dc] &= ~OPP[dir];
+        inMaze[r][c] = true;
+        addFrontier(r, c);
+      }
+
+      const maze = { size, cells, start, goal, maxNest };
+      if (countPaths(maze) !== 1) continue;
+      if (!reduceWrongNesting(maze, maxNest, rnd)) continue;
+      if (countPaths(maze) !== 1) continue;
+      const onSol = buildSolutionSet(maze);
+      if (wrongForkInfo(maze, onSol).maxNest > maxNest) continue;
+      return maze;
+    }
+    throw new Error('maze generation failed for nest cap');
   }
 
   function tryMove(maze, pos, dir) {
@@ -228,45 +344,17 @@
   }
 
   function solutionCells(maze) {
-    const { size, cells, start, goal } = maze;
-    const prev = Array.from({ length: size }, () => Array(size).fill(null));
-    const seen = Array.from({ length: size }, () => Array(size).fill(false));
-    const queue = [{ r: start.r, c: start.c }];
-    seen[start.r][start.c] = true;
-    while (queue.length) {
-      const { r, c } = queue.shift();
-      if (r === goal.r && c === goal.c) break;
-      for (const dir of DIRS) {
-        if (cells[r][c] & BITS[dir]) continue;
-        const [dr, dc] = DELTA[dir];
-        const nr = r + dr;
-        const nc = c + dc;
-        if (seen[nr][nc]) continue;
-        seen[nr][nc] = true;
-        prev[nr][nc] = { r, c };
-        queue.push({ r: nr, c: nc });
-      }
-    }
-    const on = new Set();
-    let cur = { r: goal.r, c: goal.c };
-    while (cur) {
-      on.add(`${cur.r},${cur.c}`);
-      if (cur.r === start.r && cur.c === start.c) break;
-      cur = prev[cur.r][cur.c];
-    }
-    return on;
+    return buildSolutionSet(maze);
   }
 
   function mazeStats(maze) {
-    const { size, cells, start, nest } = maze;
-    const onSol = solutionCells(maze);
+    const { size, cells, start } = maze;
+    const onSol = buildSolutionSet(maze);
     let deadEnds = 0;
     let junctions = 0;
     let solutionJunctions = 0;
     let solutionLength = 0;
     let wrongMaxDepth = 0;
-    let wrongMaxNest = 0;
-    let wrongForkNest = 0;
 
     for (let r = 0; r < size; r++) {
       for (let c = 0; c < size; c++) {
@@ -276,40 +364,28 @@
           junctions++;
           if (onSol.has(`${r},${c}`)) solutionJunctions++;
         }
-        if (nest) wrongMaxNest = Math.max(wrongMaxNest, nest[r][c]);
       }
     }
-
     for (const key of onSol) {
       if (key === `${start.r},${start.c}`) continue;
       solutionLength++;
     }
 
+    const info = wrongForkInfo(maze, onSol);
     for (const key of onSol) {
       const [r0, c0] = key.split(',').map(Number);
-      for (const dir of DIRS) {
-        if (cells[r0][c0] & BITS[dir]) continue;
-        const [dr, dc] = DELTA[dir];
-        const nr = r0 + dr;
-        const nc = c0 + dc;
-        if (onSol.has(`${nr},${nc}`)) continue;
-        const q = [{ r: nr, c: nc, depth: 1, forkDepth: 0 }];
-        const seen = new Set([`${nr},${nc}`]);
+      for (const nb of neighborsOpen(cells, size, r0, c0)) {
+        if (onSol.has(`${nb.r},${nb.c}`)) continue;
+        const q = [{ r: nb.r, c: nb.c, depth: 1 }];
+        const seen = new Set([`${nb.r},${nb.c}`]);
         while (q.length) {
-          const { r, c, depth, forkDepth } = q.shift();
+          const { r, c, depth } = q.shift();
           wrongMaxDepth = Math.max(wrongMaxDepth, depth);
-          const o = openingCount(cells[r][c]);
-          const nextFork = o >= 3 ? forkDepth + 1 : forkDepth;
-          wrongForkNest = Math.max(wrongForkNest, nextFork);
-          for (const d2 of DIRS) {
-            if (cells[r][c] & BITS[d2]) continue;
-            const [dr2, dc2] = DELTA[d2];
-            const r2 = r + dr2;
-            const c2 = c + dc2;
-            const k = `${r2},${c2}`;
+          for (const ch of neighborsOpen(cells, size, r, c)) {
+            const k = `${ch.r},${ch.c}`;
             if (onSol.has(k) || seen.has(k)) continue;
             seen.add(k);
-            q.push({ r: r2, c: c2, depth: depth + 1, forkDepth: nextFork });
+            q.push({ r: ch.r, c: ch.c, depth: depth + 1 });
           }
         }
       }
@@ -321,8 +397,8 @@
       solutionLength,
       solutionJunctions,
       wrongMaxDepth,
-      wrongMaxNest,
-      wrongForkNest,
+      wrongMaxNest: info.maxNest,
+      wrongForkNest: info.maxNest,
     };
   }
 
@@ -332,7 +408,8 @@
     isAtGoal,
     countPaths,
     mazeStats,
+    solutionCells,
     WALL: { N, E, S, W },
-    MAX_WRONG_NEST,
+    DEFAULT_MAX_WRONG_NEST,
   };
 });

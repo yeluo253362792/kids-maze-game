@@ -2,14 +2,42 @@
   const { N, E, S, W } = root.MazeCore.WALL;
   let mazeEl = null;
   let levelMeta = null;
+  let hostEl = null;
+  let resizeObserver = null;
 
   function cellEl(r, c) {
     return mazeEl.querySelector(`[data-r="${r}"][data-c="${c}"]`);
   }
 
+  function fitMaze() {
+    if (!mazeEl || !hostEl) return;
+    const side = Math.max(0, Math.floor(Math.min(hostEl.clientWidth, hostEl.clientHeight)));
+    if (side <= 0) return;
+    const px = `${side}px`;
+    mazeEl.style.width = px;
+    mazeEl.style.height = px;
+    mazeEl.style.setProperty('--maze-side', px);
+  }
+
+  function watchHost(host) {
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
+    }
+    hostEl = host;
+    if (!host || typeof ResizeObserver === 'undefined') {
+      fitMaze();
+      return;
+    }
+    resizeObserver = new ResizeObserver(() => fitMaze());
+    resizeObserver.observe(host);
+    fitMaze();
+  }
+
   function mountGrid(container, maze, level) {
     mazeEl = container;
     levelMeta = level;
+    container.style.setProperty('--maze-n', String(maze.size));
     container.style.gridTemplateColumns = `repeat(${maze.size}, 1fr)`;
     container.innerHTML = '';
     const frag = document.createDocumentFragment();
@@ -33,6 +61,12 @@
     }
     container.appendChild(frag);
     updatePlayer(null, maze.start);
+    watchHost(container.parentElement);
+    // Layout may settle after paint (flex chrome)
+    requestAnimationFrame(() => {
+      fitMaze();
+      requestAnimationFrame(fitMaze);
+    });
   }
 
   function updatePlayer(prev, next) {
@@ -66,5 +100,5 @@
     document.getElementById('win-overlay').classList.toggle('hidden', !visible);
   }
 
-  root.Render = { mountGrid, updatePlayer, setTheme, bumpPlayer, showWin };
+  root.Render = { mountGrid, updatePlayer, setTheme, bumpPlayer, showWin, fitMaze };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
