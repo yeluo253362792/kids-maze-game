@@ -249,7 +249,8 @@
     const start = { r: 0, c: 0 };
     const goal = { r: size - 1, c: size - 1 };
 
-    for (let attempt = 0; attempt < 48; attempt++) {
+    const attempts = size >= 40 ? 96 : 48;
+    for (let attempt = 0; attempt < attempts; attempt++) {
       const attemptSeed = (seed + attempt * 104729) >>> 0;
       const rnd = mulberry32(attemptSeed);
       const cells = Array.from({ length: size }, () =>

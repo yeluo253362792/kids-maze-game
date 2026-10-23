@@ -1,9 +1,12 @@
 (function () {
   const STORAGE_KEY = 'kids-maze-cleared';
+  const WIN_COUNTDOWN_SEC = 3;
   let levelIndex = 0;
   let pos = { r: 0, c: 0 };
   let inputLocked = false;
   let wired = false;
+  let winTimer = null;
+  let winRemain = 0;
 
   const screens = {
     home: document.getElementById('screen-home'),
@@ -32,26 +35,34 @@
     const host = document.getElementById('level-cards');
     const cleared = new Set(getCleared());
     host.innerHTML = '';
+    const frag = document.createDocumentFragment();
     LEVELS.forEach((level, i) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'card';
-      const nestLabel = level.maxNest <= 2 ? '分叉浅' : '分叉稍深';
-      btn.innerHTML = `${level.playerEmoji} ${level.title}<br><small>${level.size}×${level.size} · ${nestLabel}</small>${
-        cleared.has(level.id) ? '<span class="check">✅</span>' : ''
-      }`;
+      btn.className = 'level-tile' + (cleared.has(level.id) ? ' cleared' : '');
+      btn.setAttribute('role', 'listitem');
+      btn.setAttribute(
+        'aria-label',
+        `${i + 1}. ${level.title}${cleared.has(level.id) ? '，已通关' : ''}`
+      );
+      btn.title = level.title;
+      btn.innerHTML =
+        `<span class="tile-emoji" aria-hidden="true">${level.playerEmoji}</span>` +
+        `<span class="tile-num">${i + 1}</span>`;
       btn.addEventListener('click', () => startLevel(i));
-      host.appendChild(btn);
+      frag.appendChild(btn);
     });
+    host.appendChild(frag);
   }
 
   function startLevel(i) {
+    clearWinTimer();
     levelIndex = i;
     const level = LEVELS[i];
     const maze = ensureMaze(level);
     pos = { ...maze.start };
     inputLocked = false;
-    Render.setTheme(level.theme);
+    Render.setTheme(level.theme, level.colors || null);
     Render.showWin(false);
     document.getElementById('play-title').textContent = level.title;
     Render.mountGrid(document.getElementById('maze'), maze, level);
@@ -59,10 +70,50 @@
   }
 
   function restart() {
+    clearWinTimer();
     startLevel(levelIndex);
   }
 
+  function clearWinTimer() {
+    if (winTimer) {
+      clearInterval(winTimer);
+      winTimer = null;
+    }
+    winRemain = 0;
+  }
+
+  function updateWinCountdown() {
+    const el = document.getElementById('win-countdown');
+    if (!el) return;
+    const hasNext = levelIndex < LEVELS.length - 1;
+    if (!hasNext) {
+      el.textContent = '全部通关啦！';
+      el.classList.remove('is-last');
+      return;
+    }
+    el.textContent =
+      winRemain > 0 ? `${winRemain} 秒后进入下一关` : '正在进入下一关…';
+    el.classList.toggle('is-last', winRemain <= 1);
+  }
+
+  function startWinCountdown() {
+    clearWinTimer();
+    const hasNext = levelIndex < LEVELS.length - 1;
+    winRemain = hasNext ? WIN_COUNTDOWN_SEC : 0;
+    updateWinCountdown();
+    if (!hasNext) return;
+    winTimer = setInterval(() => {
+      winRemain -= 1;
+      updateWinCountdown();
+      if (winRemain <= 0) {
+        clearWinTimer();
+        nextLevel();
+      }
+    }, 1000);
+  }
+
   function goHome() {
+    clearWinTimer();
     Render.showWin(false);
     renderCards();
     show('home');
@@ -87,10 +138,12 @@
       markCleared(level.id);
       Render.showWin(true);
       Sfx.win();
+      startWinCountdown();
     }
   }
 
   function nextLevel() {
+    clearWinTimer();
     if (levelIndex < LEVELS.length - 1) startLevel(levelIndex + 1);
     else goHome();
   }

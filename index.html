@@ -10,8 +10,8 @@
   <div id="app">
     <section id="screen-home" class="screen active">
       <h1 class="brand">奇妙迷宫</h1>
-      <p class="tagline">选一个主题，走到终点吧</p>
-      <div id="level-cards" class="cards"></div>
+      <p class="tagline">点一个就开始玩</p>
+      <div id="level-cards" class="level-grid" role="list"></div>
     </section>
 
     <section id="screen-play" class="screen">
@@ -20,21 +20,24 @@
         <h2 id="play-title"></h2>
         <button type="button" id="btn-restart" class="btn ghost">重来</button>
       </header>
-      <div class="maze-host">
-        <div id="maze" class="maze" aria-label="迷宫"></div>
-      </div>
-      <div class="dpad" aria-label="方向键">
-        <button type="button" class="btn dpad-btn" data-dir="N" aria-label="上">▲</button>
-        <div class="dpad-mid">
-          <button type="button" class="btn dpad-btn" data-dir="W" aria-label="左">◀</button>
-          <button type="button" class="btn dpad-btn" data-dir="E" aria-label="右">▶</button>
+      <div class="play-body">
+        <div class="maze-host">
+          <div id="maze" class="maze" aria-label="迷宫"></div>
         </div>
-        <button type="button" class="btn dpad-btn" data-dir="S" aria-label="下">▼</button>
+        <div class="dpad" aria-label="方向键">
+          <button type="button" class="btn dpad-btn" data-dir="N" aria-label="上">▲</button>
+          <div class="dpad-mid">
+            <button type="button" class="btn dpad-btn" data-dir="W" aria-label="左">◀</button>
+            <button type="button" class="btn dpad-btn" data-dir="E" aria-label="右">▶</button>
+          </div>
+          <button type="button" class="btn dpad-btn" data-dir="S" aria-label="下">▼</button>
+        </div>
       </div>
       <div id="win-overlay" class="win-overlay hidden" role="dialog" aria-modal="true">
         <div class="win-card">
           <div class="fx" aria-hidden="true">⭐ 🎈 ⭐</div>
           <p class="win-text">太棒了！</p>
+          <p id="win-countdown" class="win-countdown" aria-live="polite">3 秒后进入下一关</p>
           <button type="button" id="btn-next" class="btn primary">下一关</button>
           <button type="button" id="btn-again" class="btn">再玩一次</button>
         </div>

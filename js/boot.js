@@ -2,6 +2,7 @@
   const GAME_SCRIPTS = [
     'js/maze-core.js',
     'js/mazes-data.js',
+    'js/levels-catalog.js',
     'js/levels.js',
     'js/render.js',
     'js/sfx.js',

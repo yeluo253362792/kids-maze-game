@@ -84,8 +84,21 @@
     }
   }
 
-  function setTheme(theme) {
+  const THEME_VARS = ['--bg', '--ink', '--on-accent', '--wall', '--path', '--accent', '--btn'];
+
+  function setTheme(theme, colors) {
     document.body.dataset.theme = theme;
+    if (colors) {
+      document.body.style.setProperty('--bg', colors.bg);
+      document.body.style.setProperty('--ink', colors.ink);
+      document.body.style.setProperty('--on-accent', colors.onAccent || colors.ink);
+      document.body.style.setProperty('--wall', colors.wall);
+      document.body.style.setProperty('--path', colors.path);
+      document.body.style.setProperty('--accent', colors.accent);
+      document.body.style.setProperty('--btn', colors.btn || colors.accent);
+      return;
+    }
+    for (const prop of THEME_VARS) document.body.style.removeProperty(prop);
   }
 
   function bumpPlayer() {
